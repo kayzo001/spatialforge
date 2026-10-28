@@ -50,8 +50,8 @@ def profile_for_executable(executable: str) -> ColmapProfile:
         )
         banner = (out.stdout or "") + (out.stderr or "")
         m = re.search(r"COLMAP\s+(\d+)\.", banner)
-        if m and int(m.group(1)) >= 4:
-            return MODERN_4X
+        if m:
+            return MODERN_4X if int(m.group(1)) >= 4 else LEGACY_3X
     except Exception:
         pass
     return MODERN_4X  # latest releases are the safe default
