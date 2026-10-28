@@ -1,0 +1,4 @@
+# Optional but recommended: Open3D point-cloud processing.
+# SpatialForge falls back to a pure-NumPy implementation when Open3D is absent,
+# so this line may be skipped on platforms without Open3D wheels.
+open3d>=0.18; python_version >= "3.9" and python_version < "3.13"

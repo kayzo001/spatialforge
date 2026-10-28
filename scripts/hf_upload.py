@@ -1,0 +1,166 @@
+#!/usr/bin/env python3
+"""Upload demo scene artifacts to the Hugging Face Hub.
+
+Large artifacts must NOT be committed to Git; publish them to HF instead.
+Authentication uses the HF_TOKEN environment variable (never hard-code it).
+
+Prerequisites:
+    pip install huggingface_hub
+    export HF_TOKEN=hf_...
+
+Usage:
+    python scripts/hf_upload.py --repo-id <user>/<repo> \
+        --project <project_id> [--create]
+
+The uploader packages the project's portable artifacts (sparse/refined cloud,
+cameras.json, scene_meta.json, metrics) plus a generated model card and
+artifact manifest. It refuses to run when artifacts are missing, so an
+empty/half-baked demo can never be published by accident.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT))
+
+PORTABLE_KINDS = ["sparse_cloud", "refined_cloud", "cameras", "scene_meta"]
+
+
+def build_manifest(project_id: str) -> dict:
+    from backend.app import db
+    from backend.app.config import settings
+
+    artifacts = db.list_artifacts(project_id)
+    project = db.get_project(project_id)
+    if project is None:
+        sys.exit(f"Unknown project {project_id}")
+    files = {}
+    for a in artifacts:
+        if a["kind"] in PORTABLE_KINDS and a["filename"]:
+            p = settings.project_dir(project_id) / "artifacts" / a["filename"]
+            if p.is_file():
+                files[a["kind"]] = {"filename": a["filename"], "bytes": a["size_bytes"]}
+    required = [k for k in PORTABLE_KINDS if k != "refined_cloud"]
+    missing = [k for k in required if k not in files]
+    if missing:
+        sys.exit(f"Refusing to upload: missing required artifacts {missing}. "
+                 "Run the reconstruction first (python scripts/prepare_demo.py).")
+    metrics = {m["kind"]: m["data"] for m in db.get_metrics(project_id)}
+    return {
+        "manifest_version": 1,
+        "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "project": {"id": project_id, "name": project["name"],
+                    "is_demo": bool(project["is_demo"])},
+        "artifacts": files,
+        "metrics": metrics,
+        "coordinate_convention": "cameras.json stores camera-to-world matrices in "
+                                 "the OpenGL convention (see docs/coordinates.md)",
+    }
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--repo-id", required=True, help="e.g. yourname/spatialforge-demo-cube")
+    ap.add_argument("--project", required=True, help="SpatialForge project id")
+    ap.add_argument("--create", action="store_true", help="create the repo if missing")
+    ap.add_argument("--repo-type", default="model", choices=["model", "dataset"])
+    args = ap.parse_args()
+
+    try:
+        from huggingface_hub import HfApi  # type: ignore
+    except ImportError:
+        sys.exit("huggingface_hub is required: pip install huggingface_hub")
+
+    manifest = build_manifest(args.project)
+    api = HfApi()  # token comes from HF_TOKEN env var
+    if args.create:
+        api.create_repo(args.repo_id, repo_type=args.repo_type, exist_ok=True)
+
+    from backend.app.config import settings
+
+    artifacts_dir = settings.project_dir(args.project) / "artifacts"
+    files: dict[str, str] = {}
+    for info in manifest["artifacts"].values():
+        files[f"{info['filename']}"] = str(artifacts_dir / info["filename"])
+    for m in db_metrics(args.project):
+        files[f"metrics/{m['kind']}.json"] = None  # materialized below
+    files["manifest.json"] = None
+
+    # materialize JSON payloads
+    manifest_path = artifacts_dir / "_hf_manifest.json"
+    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    files["manifest.json"] = str(manifest_path)
+    for kind, data in manifest["metrics"].items():
+        p = artifacts_dir / f"_hf_metrics_{kind}.json"
+        p.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        files[f"metrics/{kind}.json"] = str(p)
+
+    card_path = artifacts_dir / "_hf_model_card.md"
+    card_path.write_text(render_model_card(args.repo_id, manifest), encoding="utf-8")
+    files["README.md"] = str(card_path)
+
+    for remote_path, local in files.items():
+        if local is None:
+            continue
+        print(f"uploading {remote_path}")
+        api.upload_file(path_or_fileobj=local, path_in_repo=remote_path,
+                        repo_id=args.repo_id, repo_type=args.repo_type)
+    print(f"\nPublished to https://huggingface.co/{args.repo_id}")
+
+
+def db_metrics(project_id: str) -> list[dict]:
+    from backend.app import db
+
+    return db.get_metrics(project_id)
+
+
+def render_model_card(repo_id: str, manifest: dict) -> str:
+    metrics = manifest.get("metrics", {})
+    colmap = metrics.get("colmap", {})
+    license_line = (
+        "Synthetic dataset generated by SpatialForge (MIT)."
+        if manifest["project"]["is_demo"]
+        else "See dataset provenance in manifest.json."
+    )
+    return f"""---
+license: mit
+library_name: spatialforge
+tags:
+- structure-from-motion
+- 3d-reconstruction
+- gaussian-splatting
+- colmap
+---
+
+# SpatialForge demo scene: {manifest['project']['name']}
+
+Precomputed reconstruction artifacts published by SpatialForge.
+
+## Contents
+{chr(10).join(f"- `{k}` -> {v['filename']} ({v['bytes']} bytes)" for k, v in manifest['artifacts'].items())}
+
+## Reconstruction summary
+- images uploaded: {colmap.get('images_uploaded', 'n/a')}
+- images registered: {colmap.get('images_registered', 'n/a')}
+- sparse points: {colmap.get('num_points3d', 'n/a')}
+- mean reprojection error: {colmap.get('mean_reprojection_error_px', 'n/a')} px
+
+## Provenance
+- Source dataset: {license_line}
+- Pipeline: COLMAP SfM (CPU), SpatialForge {datetime.now(timezone.utc).year}
+- Coordinates: see manifest.json ("coordinate_convention")
+
+## Usage
+Download `sparse_cloud.ply` + `cameras.json` and load them in any PLY viewer,
+or clone the SpatialForge app and import this scene as a demo project.
+"""
+
+
+if __name__ == "__main__":
+    main()

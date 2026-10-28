@@ -1,0 +1,64 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "spatialforge"
+version = "0.1.0"
+description = "SpatialForge - transform ordinary photographs into interactive 3D worlds (SfM + Gaussian Splatting, laptop-first with Colab GPU path)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "SpatialForge contributors" }]
+keywords = ["photogrammetry", "structure-from-motion", "gaussian-splatting", "3d-reconstruction", "colmap", "nerfstudio"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Image Processing",
+    "Topic :: Multimedia :: Graphics :: 3D Modeling",
+]
+dependencies = [
+    "fastapi>=0.115,<1.0",
+    "uvicorn[standard]>=0.30,<1.0",
+    "pydantic>=2.7,<3.0",
+    "pydantic-settings>=2.3,<3.0",
+    "python-multipart>=0.0.9",
+    "aiofiles>=23.2",
+    "Pillow>=10.3",
+    "numpy>=1.26,<3.0",
+    "opencv-python-headless>=4.9",
+    "psutil>=5.9",
+]
+
+[project.optional-dependencies]
+geometry = ["open3d>=0.18"]
+dev = ["pytest>=8.0", "httpx>=0.27", "ruff>=0.5"]
+# GPU extras are intentionally NOT pip-installable as one line: the local GPU
+# path depends on a CUDA build of PyTorch plus Nerfstudio, which must match the
+# installed CUDA driver. See docs/installation.md ("Local GPU mode").
+
+[project.scripts]
+spatialforge = "backend.app.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["backend*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+markers = [
+    "integration: end-to-end tests that require external tools such as COLMAP",
+    "gpu: tests that require a CUDA-capable GPU",
+]
+
+[tool.ruff]
+line-length = 110
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+ignore = ["E501"]

@@ -1,0 +1,19 @@
+{
+  "name": "spatialforge-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "SpatialForge - AI-powered 3D reconstruction and neural scene viewer. Root convenience scripts only; the frontend lives in frontend/.",
+  "scripts": {
+    "setup": "cd frontend && npm install",
+    "dev:frontend": "npm --prefix frontend run dev",
+    "dev:backend": "python -m uvicorn backend.app.main:app --reload --port 8000",
+    "build": "npm --prefix frontend run build",
+    "test:backend": "python -m pytest tests -m 'not integration and not gpu'",
+    "test:backend:all": "python -m pytest tests",
+    "lint:backend": "ruff check backend scripts tests",
+    "lint:frontend": "npm --prefix frontend run lint"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
