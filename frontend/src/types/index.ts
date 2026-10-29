@@ -73,6 +73,7 @@ export interface ProjectOut {
   error: string | null;
   isDemo: boolean;
   imageCount: number;
+  thumbnailUrl?: string | null;
   stats: ProjectStats | null;
   createdAt: string;
   updatedAt: string;

@@ -18,25 +18,38 @@ const LEVEL_COLORS: Record<string, string> = {
   error: "text-rose-300",
 };
 
-function PipelineStages({ stage, status }: { stage: string | null; status: string }) {
+function PipelineStages({
+  stage,
+  status,
+  skipped,
+}: {
+  stage: string | null;
+  status: string;
+  skipped: Set<string>;
+}) {
   const currentIdx = stage ? STAGE_ORDER.indexOf(stage as (typeof STAGE_ORDER)[number]) : -1;
   return (
     <div className="flex items-center gap-1 flex-wrap">
       {STAGE_ORDER.map((s, i) => {
         const active = i === currentIdx && (status === "running" || status === "queued");
         const done = currentIdx < 0 ? false : i < currentIdx || status === "completed";
+        const isSkipped = skipped.has(s) && !active && done;
         return (
           <div key={s} className="flex items-center gap-1">
             <div
+              title={isSkipped ? "Skipped in CPU mode" : undefined}
               className={`px-2.5 py-1 rounded text-[11px] border transition-colors ${
                 active
                   ? "border-cyan-500/50 bg-cyan-500/10 text-cyan-300"
-                  : done
-                    ? "border-emerald-600/30 bg-emerald-500/5 text-emerald-400/80"
-                    : "border-slate-800 text-slate-600"
+                  : isSkipped
+                    ? "border-slate-700 border-dashed text-slate-500"
+                    : done
+                      ? "border-emerald-600/30 bg-emerald-500/5 text-emerald-400/80"
+                      : "border-slate-800 text-slate-600"
               }`}
             >
               {STAGE_LABELS[s]}
+              {isSkipped && <span className="ml-1 text-slate-600">· skipped</span>}
             </div>
             {i < STAGE_ORDER.length - 1 && <div className="w-2 h-px bg-slate-800" />}
           </div>
@@ -97,8 +110,8 @@ function ViewerTab({ detail }: { detail: NonNullable<ReturnType<typeof useLivePr
   const trainingMetrics = detail.metrics.find((m) => m.kind === "training")?.data as any;
 
   return (
-    <div className="flex gap-4 h-[calc(100vh-13rem)]">
-      <div className="flex-1 min-w-0 flex flex-col gap-3">
+    <div className="flex flex-col xl:flex-row gap-4 xl:h-[calc(100vh-13rem)]">
+      <div className="min-w-0 flex flex-col gap-3 h-[70vh] min-h-[420px] xl:flex-1 xl:h-auto xl:min-h-0">
         <div className="flex items-center gap-2 flex-wrap">
           {sparse && (
             <button
@@ -144,7 +157,7 @@ function ViewerTab({ detail }: { detail: NonNullable<ReturnType<typeof useLivePr
       </div>
 
       {/* Inspector */}
-      <div className="w-72 shrink-0 overflow-auto space-y-3">
+      <div className="xl:w-72 shrink-0 overflow-auto grid sm:grid-cols-2 xl:block gap-3 xl:space-y-3">
         <div className="panel p-4">
           <div className="panel-title mb-2">Scene info</div>
           <dl className="space-y-1.5 text-sm">
@@ -212,6 +225,19 @@ function Metric({ label, value, unit }: { label: string; value: string | number 
 
 type Detail = NonNullable<ReturnType<typeof useLiveProject>["detail"]>;
 
+/** Stages that did not actually run (CPU mode skips neural training + its eval). */
+function skippedStages(detail: Detail): Set<string> {
+  const training = detail.metrics.find((m) => m.kind === "training")?.data as
+    | { status?: string }
+    | undefined;
+  const out = new Set<string>();
+  if (training && training.status !== "completed") {
+    out.add("training");
+    if (!detail.metrics.some((m) => m.kind === "evaluation")) out.add("evaluation");
+  }
+  return out;
+}
+
 // Metric payloads come from persisted JSON blobs; cast once at the boundary.
 /* eslint-disable @typescript-eslint/no-explicit-any */
 function AnalyticsBody({ detail }: { detail: Detail }) {
@@ -226,7 +252,7 @@ function AnalyticsBody({ detail }: { detail: Detail }) {
         <div className="panel-title mb-2">Reconstruction statistics</div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <Metric label="Images uploaded" value={colmap?.images_uploaded ?? null} />
-          <Metric label="Images registered" value={colmap ? `${colmap.images_registered} (${Math.round((colmap.registration_ratio ?? 0) * 100)}%)` : null} />
+          <Metric label="Images registered" value={colmap ? `${colmap.num_images_registered ?? colmap.images_registered ?? "—"} / ${colmap.images_uploaded} (${Math.round(Math.min(colmap.registration_ratio ?? 0, 1) * 100)}%)` : null} />
           <Metric label="Sparse points" value={colmap?.num_points3d?.toLocaleString() ?? null} />
           <Metric label="Reproj. error" value={colmap ? Number(colmap.mean_reprojection_error_px).toFixed(3) : null} unit="px" />
           <Metric label="Mean track length" value={colmap ? Number(colmap.mean_track_length).toFixed(2) : null} />
@@ -316,10 +342,10 @@ export default function ProjectWorkspace() {
   };
 
   return (
-    <div className="max-w-7xl mx-auto px-8 py-8">
-      <div className="flex items-center gap-3">
+    <div className="max-w-7xl mx-auto px-4 sm:px-8 py-8">
+      <div className="flex flex-wrap items-center gap-3">
         <Link to="/" className="btn-ghost !py-1.5 !px-2"><ArrowLeft className="w-4 h-4" /></Link>
-        <h1 className="text-xl font-semibold tracking-tight text-slate-100">{detail.name}</h1>
+        <h1 className="text-xl font-semibold tracking-tight text-slate-100 min-w-0 break-words">{detail.name}</h1>
         <StatusBadge status={detail.status} />
         <div className="ml-auto flex items-center gap-2">
           {running && (
@@ -331,7 +357,7 @@ export default function ProjectWorkspace() {
           {detail.status === "completed" && (
             <button className="btn-ghost" disabled={busy}
               onClick={() => act(() => api.reconstruct(detail.id, { mode: detail.mode, preset: detail.preset ?? "balanced" }))}>
-              <RefreshCw className="w-4 h-4" /> Re-run
+              <RefreshCw className="w-4 h-4" /> <span className="whitespace-nowrap">Re-run</span>
             </button>
           )}
           {!running && (
@@ -370,7 +396,11 @@ export default function ProjectWorkspace() {
         {tab === "pipeline" && (
           <div className="space-y-4">
             <div className="panel p-5">
-              <PipelineStages stage={job?.stage ?? null} status={job?.status ?? detail.status} />
+              <PipelineStages
+                stage={job?.stage ?? null}
+                status={job?.status ?? detail.status}
+                skipped={skippedStages(detail)}
+              />
               <div className="mt-4 h-1.5 bg-slate-800 rounded overflow-hidden">
                 <div
                   className={`h-full transition-all duration-500 ${

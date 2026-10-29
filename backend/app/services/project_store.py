@@ -13,6 +13,14 @@ STAGE_ORDER = [
 ]
 
 
+def _thumbnail_url(project_id: str) -> str | None:
+    """First uploaded photo, used as the dashboard card thumbnail."""
+    images = db.list_images(project_id)
+    if not images:
+        return None
+    return f"/api/projects/{project_id}/images/{images[0]['id']}/file"
+
+
 def project_out(row: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": row["id"],
@@ -24,6 +32,7 @@ def project_out(row: dict[str, Any]) -> dict[str, Any]:
         "error": row["error"],
         "isDemo": bool(row["is_demo"]),
         "imageCount": row["image_count"],
+        "thumbnailUrl": _thumbnail_url(row["id"]) if row["image_count"] else None,
         "stats": json.loads(row["stats_json"]) if row["stats_json"] else None,
         "createdAt": row["created_at"],
         "updatedAt": row["updated_at"],

@@ -50,6 +50,17 @@ def preprocess_image(src: Path, dest_dir: Path, max_edge: int = 1600,
 
 def preprocess_dataset(original_paths: list[Path], dest_dir: Path,
                        max_edge: int = 1600) -> list[dict]:
+    """Regenerate `dest_dir` from the originals.
+
+    `dest_dir` only ever holds derived copies, so it is emptied first. Without
+    this, a re-run found last run's files, the uniqueness counter in
+    preprocess_image() kicked in, and every photo appeared twice
+    (view_000.jpg + view_000_1.jpg) - COLMAP then registered 72/36 images.
+    """
+    if dest_dir.exists():
+        for stale in dest_dir.iterdir():
+            if stale.is_file():
+                stale.unlink()
     dest_dir.mkdir(parents=True, exist_ok=True)
     results = []
     for src in original_paths:
