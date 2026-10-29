@@ -1,5 +1,10 @@
 # SpatialForge
 
+[![CI](https://github.com/kayzo001/spatialforge/actions/workflows/ci.yml/badge.svg)](https://github.com/kayzo001/spatialforge/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+![Python 3.10-3.12](https://img.shields.io/badge/python-3.10--3.12-blue)
+![COLMAP 3.8+ / 4.x](https://img.shields.io/badge/COLMAP-3.8%2B%20%7C%204.x-informational)
+
 **Transform ordinary photographs into interactive 3D worlds.**
 
 SpatialForge is an open-source, web-based 3D reconstruction workbench: upload
@@ -15,7 +20,7 @@ no placeholder meshes, no simulated progress, no invented metrics.
 > narrative walkthrough of the system: every pipeline stage, the architecture,
 > the design decisions and what has (and hasn't) been verified.
 
-![3D viewer with reconstructed camera frustum orbit](assets/screenshot_viewer_frustums.png)
+![3D viewer: the synthetic demo scene with its 36 reconstructed camera poses](assets/screenshot_viewer_frustums.png)
 
 ## Why it matters
 
@@ -106,13 +111,20 @@ never presented as novel-view performance. Details and limitations:
 
 ## Screenshots
 
-Refined point cloud of the synthetic demo scene:
+Refined point cloud of the synthetic demo scene (cameras hidden, hovering a
+point shows its index and coordinates):
 
 ![refined point cloud](assets/screenshot_viewer_refined.png)
 
-The pipeline tab shows live stage progress and real COLMAP logs; the
-analytics tab reports registration statistics, reprojection error and
-(not yet trained, honestly labeled) neural-rendering metrics.
+Analytics for the same run: every registered image, reprojection error and
+track statistics come straight from COLMAP's output. Neural-rendering metrics
+read "Not available" until a Gaussian Splatting run actually produces them.
+
+![analytics tab](assets/screenshot_analytics.png)
+
+The pipeline tab shows live stage progress and the real COLMAP log for the
+current run; stages that did not run (e.g. training in CPU mode) are marked
+*skipped* rather than shown as done.
 
 ## Installation
 
@@ -120,21 +132,27 @@ Prerequisites: Python 3.10-3.12, Node.js ≥ 18 (frontend build), COLMAP
 (installer script provided). CUDA is **not** required.
 
 ```bash
-git clone <your-fork-url> spatialforge && cd spatialforge
-
-# 1. backend
+git clone https://github.com/kayzo001/spatialforge.git
+cd spatialforge
 python -m venv .venv
-.venv/Scripts/python -m pip install -r requirements.txt -r requirements-geometry.txt -r requirements-dev.txt   # Windows
-# .venv/bin/python -m pip install ...                                                            # Linux/macOS
+```
 
-# 2. COLMAP (Windows; apt/dnf/brew elsewhere)
-python scripts/install_colmap.py
+**Windows (PowerShell)**
 
-# 3. frontend
-cd frontend && npm install && npm run build && cd ..
+```powershell
+.venv\Scripts\python -m pip install -r requirements.txt -r requirements-geometry.txt -r requirements-dev.txt
+.venv\Scripts\python scripts\install_colmap.py      # downloads COLMAP into tools\colmap (no admin)
+cd frontend; npm install; npm run build; cd ..
+.venv\Scripts\python scripts\detect_env.py          # confirms what this machine can run
+```
 
-# 4. check your machine
-python scripts/detect_env.py
+**Linux / macOS**
+
+```bash
+.venv/bin/python -m pip install -r requirements.txt -r requirements-geometry.txt -r requirements-dev.txt
+sudo apt install colmap        # Debian/Ubuntu · Fedora: sudo dnf install colmap · macOS: brew install colmap
+(cd frontend && npm install && npm run build)
+.venv/bin/python scripts/detect_env.py
 ```
 
 Detailed steps, GPU-training setup and platform notes:
@@ -144,10 +162,15 @@ Detailed steps, GPU-training setup and platform notes:
 
 ```bash
 # backend + built frontend on one port
-.venv/Scripts/python -m uvicorn backend.app.main:app --port 8000
+.venv/Scripts/python -m uvicorn backend.app.main:app --port 8000   # Windows
+.venv/bin/python -m uvicorn backend.app.main:app --port 8000       # Linux/macOS
+
 # development frontend with hot reload (second terminal)
 cd frontend && npm run dev
 ```
+
+After pulling new frontend code, run `npm run build` again: the backend serves
+whatever is in `frontend/dist`.
 
 - App: http://127.0.0.1:8000 (or the Vite dev server on :5173)
 - OpenAPI: http://127.0.0.1:8000/docs
@@ -167,14 +190,16 @@ lock focus/exposure, avoid textureless or reflective surfaces.
 ## Tests
 
 ```bash
-python -m pytest tests -m "not integration and not gpu"   # unit suite (57 tests)
+python -m pytest tests -m "not integration and not gpu"   # unit suite (61 tests)
 python -m pytest tests -m "integration"                    # end-to-end w/ real COLMAP
 python -m pytest tests                                     # everything
 ```
 
 The integration test runs the full pipeline and asserts the reconstructed
 camera poses match ground truth after similarity alignment — it skips
-explicitly when COLMAP is absent rather than faking success.
+explicitly when COLMAP is absent rather than faking success. CI runs it on
+Ubuntu against the distribution's COLMAP 3.x; the benchmarks below were
+measured locally on COLMAP 4.2.1, so both option profiles are exercised.
 
 ## Benchmarks
 
@@ -216,7 +241,7 @@ here when one exists.
 | Binary model parser, coordinate transforms | ✅ implemented & tested (unit + GT integration) |
 | Point-cloud processing + PLY export | ✅ implemented & tested |
 | REST API, SSE live updates, single-worker queue | ✅ implemented & tested |
-| three.js point-cloud viewer + camera frustums | ✅ implemented & visually verified |
+| three.js point-cloud viewer + camera frustums | ✅ implemented & verified (camera centers match `cameras.json` exactly) |
 | Gaussian Splatting path (presets, ns-train/eval/export orchestration) | ✅ implemented, ⚠️ not executed on required hardware here (Colab path provided) |
 | Splat rendering in browser (@mkkellogg/gaussian-splats-3d) | ✅ implemented, ⚠️ not exercised with a trained artifact here |
 | PSNR/SSIM | ✅ implemented & tested |
@@ -247,6 +272,10 @@ here when one exists.
 - Progressive splat streaming and Draco-compressed geometry
 - Rig/EXIF-aided camera grouping for video-frame input
 
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for fixes and changes between versions.
+
 ## License
 
 MIT — see [LICENSE](LICENSE). Dependency licenses (COLMAP BSD, Nerfstudio
@@ -255,7 +284,8 @@ downloader targets sources free for research use and cites them in-script.
 
 ## Repository quality
 
-- CI: GitHub Actions running ruff + pytest (unit) and the frontend build
+- CI: GitHub Actions running ruff, the unit suite, the real-COLMAP
+  integration test and the frontend build (TypeScript check + Vite)
 - Dependabot: pip + npm ecosystems, weekly
 - Issue templates: bug report / feature request
 - `ruff check backend scripts tests` clean

@@ -253,7 +253,14 @@ def add_log(project_id: str, level: str, message: str, job_id: str | None = None
     return ts
 
 
-def list_logs(project_id: str, after_id: int = 0, limit: int = 1000) -> list[dict[str, Any]]:
+def list_logs(project_id: str, after_id: int = 0, limit: int = 1000,
+              job_id: str | None = None) -> list[dict[str, Any]]:
+    if job_id:
+        return query(
+            "SELECT * FROM logs WHERE project_id = ? AND job_id = ? AND id > ? "
+            "ORDER BY id ASC LIMIT ?",
+            (project_id, job_id, after_id, limit),
+        )
     return query(
         "SELECT * FROM logs WHERE project_id = ? AND id > ? ORDER BY id ASC LIMIT ?",
         (project_id, after_id, limit),

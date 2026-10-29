@@ -171,9 +171,11 @@ def image_file(project_id: str, image_id: str) -> FileResponse:
 
 
 @router.get("/{project_id}/logs")
-def logs(project_id: str, after_id: int = Query(0), limit: int = Query(500, le=2000)) -> dict:
+def logs(project_id: str, after_id: int = Query(0), limit: int = Query(500, le=2000),
+         job_id: str | None = Query(None)) -> dict:
+    """Project logs; pass `job_id` to get only one run (the UI shows the latest)."""
     _get_project_or_404(project_id)
-    rows = db.list_logs(project_id, after_id=after_id, limit=limit)
+    rows = db.list_logs(project_id, after_id=after_id, limit=limit, job_id=job_id)
     return {
         "logs": [
             {"id": r["id"], "ts": r["ts"], "level": r["level"], "message": r["message"]}

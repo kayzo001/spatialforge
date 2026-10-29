@@ -20,6 +20,12 @@ The usual causes, in order of likelihood:
 **"Only N% of images registered"** — the pipeline continues with a warning;
 the missing views likely have weak overlap. Recapture those viewpoints.
 
+**More cameras registered than images uploaded (e.g. "72/36")** — projects
+reconstructed before the duplicate-image fix contain a second copy of every
+photo. Press **Re-run** once: preprocessing now regenerates `images/` from the
+originals, and the COLMAP cache (`colmap/inputs.json`) is rebuilt whenever the
+image set changes.
+
 **Mapper produces tiny fragmented models** — COLMAP may output several model
 directories; SpatialForge automatically uses the largest one.
 
@@ -47,6 +53,13 @@ directories; SpatialForge automatically uses the largest one.
   enabled only when the corresponding artifact actually exists.
 - **Live progress stalls** — SSE runs over the same origin; if you proxy the
   backend, make sure buffering is disabled for `text/event-stream`.
+- **Page looks like an older version after updating** — rebuild the
+  frontend (`npm run build` in `frontend/`), then reload. Browsers that cached
+  the page before the no-cache headers were added may need one hard reload
+  (Ctrl+Shift+R).
+- **Viewer shows old results after a re-run** — artifacts are served with
+  `Cache-Control: no-cache`, so a reload revalidates them; a one-time hard
+  reload clears copies cached by older versions.
 - **Status "failed: interrupted by server restart"** — jobs do not survive
   restarts by design; press Re-run.
 

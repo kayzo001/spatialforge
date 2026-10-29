@@ -134,7 +134,11 @@ Originals are never modified. Derivatives are written to `images/`: EXIF
 orientation applied (a photo stored rotated must actually *be* rotated before
 SIFT, or every pose is wrong), longest edge bounded (default 1600 px, Lanczos
 resampling to preserve SIFT-friendly texture), encoded as quality-92 JPEG.
-A mapping file records what was derived from what.
+A mapping file records what was derived from what. `images/` is emptied and
+regenerated on every run, so a re-run reproduces the same file names instead
+of accumulating `*_1.jpg` copies. The COLMAP database and models are cached
+between runs only while `colmap/inputs.json` (a fingerprint of the processed
+image set) still matches; any change to the inputs rebuilds them.
 
 ### 4.3 COLMAP SfM — `colmap/commands.py`, `colmap/runner.py`
 
@@ -302,10 +306,14 @@ Five surfaces:
   (XHR), the validation report, preset and execution-mode pickers where
   unavailable modes are *disabled with the reason*.
 - **Pipeline tab** — the ten-stage stepper (Upload → … → Export), progress
-  bar driven by actual job progress, and the raw COLMAP log console.
+  bar driven by actual job progress, and the raw COLMAP log console for the
+  current run. Stages that did not run (training in CPU mode) show as
+  *skipped*.
 - **3D Viewer** — R3F scene: point clouds loaded through a hand-written
   binary-PLY parser (`viewers/plyLoader.ts`) into `THREE.Points`, camera
-  frustums built from `cameras.json` (position + FOV-true pyramids), grid,
+  frustums built from `cameras.json` (position + FOV-true pyramids; the
+  file stores `c2w` row-major, so it is loaded with `Matrix4.set`, not the
+  column-major `fromArray`), grid,
   background select, screenshot capture (WebGL buffer preserved), and
   auto-framing to the cloud's bounding sphere. The splat mode mounts
   `@mkkellogg/gaussian-splats-3d` — real anisotropic Gaussian rendering —
@@ -359,7 +367,7 @@ with citations.
 
 **Testing philosophy** — mock only the boundary:
 
-- **Unit (57)**: ZIP security attacks, blur/duplicate detection, both COLMAP
+- **Unit (61)**: ZIP security attacks, blur/duplicate detection, both COLMAP
   command profiles, binary parsing against hand-built fixtures (including
   both header widths), quaternion/matrix round-trips, the OpenCV→OpenGL
   conversion, similarity alignment recovery, point-cloud semantics (also with
@@ -417,7 +425,7 @@ numbers belong there once produced.
 ├── notebooks/SpatialForge_Colab.ipynb   GPU workflow (14 cells)
 ├── scripts/                       env detection, COLMAP installer, dataset
 │                                  generator, demo prep, HF up/download
-├── tests/unit, tests/integration  57 + 1 tests
+├── tests/unit, tests/integration  61 + 1 tests
 ├── docs/                          installation, architecture, coordinates,
 │                                  colab, evaluation, troubleshooting
 └── assets/                        real screenshots
