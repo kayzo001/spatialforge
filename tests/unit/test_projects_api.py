@@ -206,3 +206,17 @@ def test_failed_job_surfaces_error(client, monkeypatch):
 def test_missing_project_returns_404(client):
     assert client.get("/api/projects/doesnotexist").status_code == 404
     assert client.post("/api/projects/doesnotexist/reconstruct", json={}).status_code == 404
+
+
+def test_logs_can_be_scoped_to_one_job(client):
+    from backend.app import db
+
+    pid = client.post("/api/projects", json={"name": "log scope"}).json()["id"]
+    db.add_log(pid, "info", "old run", job_id="job-old")
+    db.add_log(pid, "info", "new run", job_id="job-new")
+
+    everything = client.get(f"/api/projects/{pid}/logs").json()["logs"]
+    latest = client.get(f"/api/projects/{pid}/logs", params={"job_id": "job-new"}).json()["logs"]
+
+    assert [entry["message"] for entry in everything] == ["old run", "new run"]
+    assert [entry["message"] for entry in latest] == ["new run"]

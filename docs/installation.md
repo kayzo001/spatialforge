@@ -26,6 +26,8 @@ are usable. Run this before installing anything else.
 ## 2. Python backend
 
 ```bash
+git clone https://github.com/kayzo001/spatialforge.git
+cd spatialforge
 python -m venv .venv
 # Windows (Git Bash / PowerShell):
 .venv/Scripts/python -m pip install -r requirements.txt -r requirements-geometry.txt -r requirements-dev.txt
@@ -67,10 +69,15 @@ npm run dev        # http://localhost:5173, /api proxied to :8000
 
 ```bash
 # backend (from the repo root)
-.venv/Scripts/python -m uvicorn backend.app.main:app --port 8000
+.venv/Scripts/python -m uvicorn backend.app.main:app --port 8000   # Windows
+.venv/bin/python -m uvicorn backend.app.main:app --port 8000       # Linux/macOS
 # or equivalently:
-.venv/Scripts/python -m backend.app.cli serve
+.venv/Scripts/python -m backend.app.cli serve                      # (.venv/bin/python on Linux/macOS)
 ```
+
+The backend serves whatever is in `frontend/dist`, so re-run `npm run build`
+after pulling frontend changes. The HTML shell is sent with
+`Cache-Control: no-cache`, so a normal reload picks up the new build.
 
 - Development: open http://localhost:5173 (Vite dev server)
 - Production-style: open http://127.0.0.1:8000 (backend serves the built SPA)
@@ -94,6 +101,8 @@ ZIP → choose preset/mode → Start.
 Only needed for Gaussian-Splatting training on your own GPU. The environment
 must match your CUDA driver; there is deliberately no single `pip install`
 line because the correct PyTorch build depends on the driver.
+
+Use `.venv/bin/python` instead of `.venv/Scripts/python` on Linux.
 
 ```bash
 # 1. PyTorch with CUDA matching your driver (example for CUDA 12.1):

@@ -82,8 +82,11 @@ export const api = {
     fetch(`/api/projects/${id}/status`).then(
       (r) => handle<{ project: ProjectOut; job: JobOut | null }>(r),
     ),
-  logs: (id: string, afterId = 0) =>
-    fetch(`/api/projects/${id}/logs?after_id=${afterId}`).then((r) =>
+  logs: (id: string, afterId = 0, jobId?: string | null) =>
+    fetch(
+      `/api/projects/${id}/logs?after_id=${afterId}&limit=2000` +
+        (jobId ? `&job_id=${encodeURIComponent(jobId)}` : ""),
+    ).then((r) =>
       handle<{ logs: { id: number; ts: string; level: string; message: string }[]; lastId: number }>(r),
     ),
   metrics: (id: string) =>

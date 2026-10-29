@@ -133,7 +133,7 @@ export default function Dashboard() {
                 </div>
               )}
               <div className="absolute inset-0 bg-gradient-to-t from-[#0b0e14]/80 via-transparent to-transparent" />
-              <div className="absolute top-2.5 right-2.5">
+              <div className="absolute top-2.5 right-2.5 rounded bg-[#0b0e14]/85 backdrop-blur-sm">
                 <StatusBadge status={p.status} />
               </div>
             </div>

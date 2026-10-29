@@ -19,6 +19,9 @@ export function useLiveProject(projectId: string | undefined): LiveState {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const lastLogId = useRef(0);
+  // Logs are scoped to the latest job, so a re-run starts with a clean console
+  // instead of appending to (or, past 500 lines, showing only) older runs.
+  const jobIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!projectId) return;
@@ -26,7 +29,7 @@ export function useLiveProject(projectId: string | undefined): LiveState {
 
     const pullLogs = async () => {
       try {
-        const res = await api.logs(projectId, lastLogId.current);
+        const res = await api.logs(projectId, lastLogId.current, jobIdRef.current);
         if (res.logs.length) {
           lastLogId.current = res.lastId;
           setLogs((prev) => [...prev, ...res.logs].slice(-500));
@@ -39,7 +42,14 @@ export function useLiveProject(projectId: string | undefined): LiveState {
     const refresh = async () => {
       try {
         const d = await api.getProject(projectId);
-        if (!closed) setDetail(d);
+        if (closed) return;
+        const jobId = d.job?.id ?? null;
+        if (jobId !== jobIdRef.current) {
+          jobIdRef.current = jobId;
+          lastLogId.current = 0;
+          setLogs([]);
+        }
+        setDetail(d);
       } catch (e) {
         if (!closed) setError(String(e));
       } finally {
@@ -81,7 +91,7 @@ export function useLiveProject(projectId: string | undefined): LiveState {
         return;
       }
       // status / done / error -> full refresh for authoritative state
-      void refresh();
+      void refresh().then(pullLogs);
     });
 
     // safety net: poll while a job is running even if SSE hiccups
