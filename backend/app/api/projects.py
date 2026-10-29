@@ -155,7 +155,10 @@ def artifact_file(project_id: str, kind: str, filename: str) -> FileResponse:
     path = db.artifact_path(project_id, kind, filename)
     if path is None:
         raise HTTPException(404, "Artifact not found")
-    return FileResponse(path, filename=filename)
+    # Re-runs overwrite artifacts in place under the same URL; force the
+    # browser to revalidate (cheap: ETag/Last-Modified) instead of reusing
+    # a stale point cloud or camera file.
+    return FileResponse(path, filename=filename, headers={"Cache-Control": "no-cache"})
 
 
 @router.get("/{project_id}/images/{image_id}/file")

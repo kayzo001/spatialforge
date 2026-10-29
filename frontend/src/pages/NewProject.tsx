@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { UploadCloud, Check, X, Loader2, Zap, Scale, Gem } from "lucide-react";
 import { api } from "../services/api";
@@ -24,13 +24,25 @@ export default function NewProject() {
   const [preset, setPreset] = useState("balanced");
   const [mode, setMode] = useState<"cpu" | "gpu" | "colab">("cpu");
   const [caps, setCaps] = useState<SystemCapabilities | null>(null);
+  const [capsLoading, setCapsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const refreshCaps = useCallback(() => {
-    api.capabilities().then(setCaps).catch(() => setCaps(null));
+    setCapsLoading(true);
+    api
+      .capabilities()
+      .then(setCaps)
+      .catch(() => setCaps(null))
+      .finally(() => setCapsLoading(false));
   }, []);
+
+  // Detect COLMAP / GPU support as soon as the page opens. Without this the
+  // page showed "COLMAP was not detected" until Re-detect was clicked.
+  useEffect(() => {
+    refreshCaps();
+  }, [refreshCaps]);
 
   const uploadFiles = useCallback(
     (list: File[]) => {
@@ -180,7 +192,7 @@ export default function NewProject() {
 
       <div className="panel p-5 mt-4">
         <div className="panel-title mb-3">Training preset</div>
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           {PRESETS.map(({ key, label, icon: Icon, desc }) => (
             <button
               key={key}
@@ -208,7 +220,9 @@ export default function NewProject() {
             <label
               key={key}
               className={`flex items-start gap-3 rounded-lg border p-3 transition-colors ${
-                !enabled
+                capsLoading && key !== "colab"
+                  ? "opacity-60 cursor-wait border-slate-800"
+                  : !enabled
                   ? "opacity-40 cursor-not-allowed border-slate-800"
                   : mode === key
                     ? "border-cyan-500/50 bg-cyan-500/5 cursor-pointer"
@@ -220,18 +234,23 @@ export default function NewProject() {
                 name="mode"
                 className="mt-1 accent-cyan-500"
                 checked={mode === key}
-                disabled={!enabled}
+                disabled={!enabled || (capsLoading && key !== "colab")}
                 onChange={() => setMode(key as "cpu" | "gpu" | "colab")}
               />
               <div>
                 <div className="text-sm text-slate-200">
                   {label}
-                  {!enabled && (
-                    <span className="ml-2 text-[10px] uppercase tracking-wider text-amber-400/80">
-                      {key === "gpu" && !cpuReady
-                        ? "COLMAP missing"
-                        : "not available locally"}
+                  {capsLoading && key !== "colab" ? (
+                    <span className="ml-2 text-[10px] uppercase tracking-wider text-slate-500">
+                      <Loader2 className="w-3 h-3 inline animate-spin mr-1" />
+                      checking…
                     </span>
+                  ) : (
+                    !enabled && (
+                      <span className="ml-2 text-[10px] uppercase tracking-wider text-amber-400/80">
+                        {key === "cpu" ? "COLMAP missing" : "not available locally"}
+                      </span>
+                    )
                   )}
                 </div>
                 <div className="text-[11px] text-slate-500 mt-0.5">{desc}</div>
@@ -239,7 +258,7 @@ export default function NewProject() {
             </label>
           ))}
         </div>
-        {!cpuReady && (
+        {!capsLoading && !cpuReady && (
           <p className="text-xs text-amber-300/90 mt-3">
             COLMAP was not detected on this machine — run{" "}
             <code className="text-amber-200">python scripts/install_colmap.py</code> to enable

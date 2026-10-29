@@ -62,6 +62,29 @@ def _find_model_dir(root: Path) -> Path | None:
     return max(candidates, key=lambda d: (d / "images.bin").stat().st_size)
 
 
+def _input_fingerprint(processed: list[dict]) -> list[list[Any]]:
+    return sorted([p["processed_name"], list(p["processed_size"])] for p in processed)
+
+
+def _colmap_cache_valid(colmap_dir: Path, processed: list[dict]) -> bool:
+    """True only if caching is on and the cache was built from these images."""
+    if not settings.use_cache:
+        return False
+    fp_path = colmap_dir / "inputs.json"
+    if not fp_path.is_file():
+        return False
+    try:
+        return json.loads(fp_path.read_text(encoding="utf-8")) == _input_fingerprint(processed)
+    except (OSError, ValueError):
+        return False
+
+
+def _write_colmap_fingerprint(colmap_dir: Path, processed: list[dict]) -> None:
+    colmap_dir.mkdir(parents=True, exist_ok=True)
+    (colmap_dir / "inputs.json").write_text(
+        json.dumps(_input_fingerprint(processed)), encoding="utf-8")
+
+
 def run_reconstruction(ctx: JobContext, project: dict, params: dict) -> dict[str, Any]:
     t_start = time.time()
     project_id = project["id"]
@@ -98,6 +121,7 @@ def run_reconstruction(ctx: JobContext, project: dict, params: dict) -> dict[str
     ctx.stage("preprocessing", "Normalizing EXIF and resizing images")
     ctx.progress(0.02)
     originals = [Path(r["filepath"]) for r in image_rows]
+    # preprocess_dataset() empties images/ first, so re-runs never duplicate.
     processed = preprocess_dataset(originals, images_dir, settings.max_image_size)
     failed = [p for p in processed if "error" in p]
     if failed:
@@ -125,12 +149,20 @@ def run_reconstruction(ctx: JobContext, project: dict, params: dict) -> dict[str
 
     # ---- Stage 3: COLMAP SfM ---------------------------------------------
     database_path = colmap_dir / "database.db"
-    if database_path.exists() and not settings.use_cache:
-        database_path.unlink()
-    for stale in ("sparse", "undistorted"):
-        target = colmap_dir / stale
-        if target.exists() and not settings.use_cache:
-            shutil.rmtree(target, ignore_errors=True)
+    # The COLMAP cache is only valid for the exact image set it was built
+    # from. Otherwise a re-run after the inputs change (or after the old
+    # duplicate-image bug) silently reloads the stale database/model.
+    cache_valid = _colmap_cache_valid(colmap_dir, ok_processed)
+    if not cache_valid:
+        if database_path.exists():
+            database_path.unlink()
+        for stale in ("sparse", "undistorted"):
+            target = colmap_dir / stale
+            if target.exists():
+                shutil.rmtree(target, ignore_errors=True)
+        if settings.use_cache:
+            ctx.log("Input images changed since the last run; rebuilding COLMAP cache")
+    _write_colmap_fingerprint(colmap_dir, ok_processed)
 
     ctx.stage("feature_extraction", "Extracting SIFT features (CPU)")
     try:
@@ -201,7 +233,7 @@ def run_reconstruction(ctx: JobContext, project: dict, params: dict) -> dict[str
 
     # undistorted copy in the Nerfstudio-ready layout (images/ + sparse/)
     undistorted = colmap_dir / "undistorted"
-    if not undistorted.exists() or not settings.use_cache:
+    if not undistorted.exists() or not cache_valid:
         ctx.log("Undistorting images into the training-ready layout")
         undistorted.mkdir(parents=True, exist_ok=True)
         try:

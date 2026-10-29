@@ -71,7 +71,10 @@ def create_app() -> FastAPI:
             candidate = FRONTEND_DIST / full_path
             if full_path and candidate.is_file():
                 return FileResponse(candidate)
-            return FileResponse(FRONTEND_DIST / "index.html")
+            # index.html must never be cached: it names the hashed JS/CSS
+            # bundles, so a stale copy keeps serving the previous build.
+            return FileResponse(FRONTEND_DIST / "index.html",
+                                headers={"Cache-Control": "no-cache"})
 
     return app
 

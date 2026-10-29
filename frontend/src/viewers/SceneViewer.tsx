@@ -22,6 +22,22 @@ interface FlyTarget {
 
 const smoothstep = (t: number) => t * t * (3 - 2 * t);
 
+/**
+ * cameras.json stores c2w as nested rows (row-major). THREE.Matrix4.fromArray
+ * expects column-major, so it would silently transpose the pose: frustums turn
+ * into long projective spikes and every camera lands at the origin.
+ * Matrix4.set() takes row-major arguments, which matches the file.
+ */
+function poseMatrix(c2w: number[][]): THREE.Matrix4 {
+  const r = c2w.flat();
+  return new THREE.Matrix4().set(
+    r[0], r[1], r[2], r[3],
+    r[4], r[5], r[6], r[7],
+    r[8], r[9], r[10], r[11],
+    r[12] ?? 0, r[13] ?? 0, r[14] ?? 0, r[15] ?? 1,
+  );
+}
+
 /** Radial gradient coloring from the cloud centroid: indigo core -> cyan -> amber rim. */
 function depthColorArray(ply: PlyCloud): Float32Array {
   const n = ply.vertexCount;
@@ -134,9 +150,9 @@ function CameraFrustumLines({
 }) {
   const geometry = useMemo(() => {
     const vertices: number[] = [];
-    const scale = Math.max(sceneRadius * 0.1, 0.03);
+    const scale = Math.max(sceneRadius * 0.045, 0.02);
     for (const cam of poses) {
-      const c2w = new THREE.Matrix4().fromArray(cam.c2w.flat());
+      const c2w = poseMatrix(cam.c2w);
       const aspect = cam.width / cam.height;
       const halfH = Math.tan(((cam.fov_y_deg / 2) * Math.PI) / 180) * scale;
       const halfW = halfH * aspect;
@@ -162,7 +178,7 @@ function CameraFrustumLines({
   if (!visible) return null;
   return (
     <lineSegments geometry={geometry}>
-      <lineBasicMaterial color="#0ea5b7" transparent opacity={0.5} />
+      <lineBasicMaterial color="#22d3ee" transparent opacity={0.55} />
     </lineSegments>
   );
 }
@@ -179,12 +195,12 @@ function CameraMarkers({
   onPick: (pose: CameraPose) => void;
 }) {
   const [hovered, setHovered] = useState<number | null>(null);
-  const size = Math.max(sceneRadius * 0.022, 0.012);
+  const size = Math.max(sceneRadius * 0.012, 0.008);
   if (!visible) return null;
   return (
     <group>
       {poses.map((pose) => {
-        const c2w = new THREE.Matrix4().fromArray(pose.c2w.flat());
+        const c2w = poseMatrix(pose.c2w);
         const pos = new THREE.Vector3().setFromMatrixPosition(c2w);
         return (
           <mesh
@@ -445,7 +461,7 @@ export default function ViewerPanel({ plyUrl, camerasUrl, fileHint }: ViewerPane
   const [showCameras, setShowCameras] = useState(true);
   const [autoRotate, setAutoRotate] = useState(false);
   const [colorMode, setColorMode] = useState<ColorMode>("original");
-  const [pointScale, setPointScale] = useState(1);
+  const [pointScale, setPointScale] = useState(1.6);
   const [background, setBackground] = useState("#0b0e14");
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [flashKey, setFlashKey] = useState(0);
@@ -478,14 +494,14 @@ export default function ViewerPanel({ plyUrl, camerasUrl, fileHint }: ViewerPane
 
   const pickCamera = useCallback(
     (pose: CameraPose) => {
-      const c2w = new THREE.Matrix4().fromArray(pose.c2w.flat());
+      const c2w = poseMatrix(pose.c2w);
       const pos = new THREE.Vector3().setFromMatrixPosition(c2w);
       const quat = new THREE.Quaternion().setFromRotationMatrix(c2w);
       const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(quat);
       flyTo({
         pos: pos.toArray(),
         quat: quat.toArray(),
-        target: pos.clone().add(forward.multiplyScalar(Math.max(pos.length() * 0.5, 0.3))).toArray(),
+        target: pos.clone().add(forward.multiplyScalar(0.5)).toArray(),
       });
       setLastPoseName(pose.name);
     },
@@ -595,7 +611,7 @@ export default function ViewerPanel({ plyUrl, camerasUrl, fileHint }: ViewerPane
     <div className="relative h-full w-full">
       {/* toolbar */}
       <div className="absolute top-2.5 left-2.5 right-2.5 z-10 flex items-center gap-1.5 flex-wrap pointer-events-none">
-        <div className="pointer-events-auto flex items-center gap-1 rounded-lg border border-slate-700/60 bg-[#0b0e14]/85 backdrop-blur px-1.5 py-1 shadow-glow-soft">
+        <div className="pointer-events-auto flex flex-wrap items-center gap-1 max-w-full rounded-lg border border-slate-700/60 bg-[#0b0e14]/85 backdrop-blur px-1.5 py-1 shadow-glow-soft">
           <button
             className={`btn-tool ${showGrid ? "!text-cyan-300 !border-cyan-700/60" : ""}`}
             title="Grid (G)"
@@ -623,24 +639,24 @@ export default function ViewerPanel({ plyUrl, camerasUrl, fileHint }: ViewerPane
           <div className="w-px h-5 bg-slate-700/70 mx-0.5" />
           <button
             className={`btn-tool !px-1.5 ${colorMode === "original" ? "!text-cyan-300 !border-cyan-700/60" : ""}`}
-            title="Original colors (1)"
+            title="Original photo colors (1)"
             onClick={() => setColorMode("original")}
           >
-            RGB
+            Color
           </button>
           <button
             className={`btn-tool !px-1.5 ${colorMode === "cyan" ? "!text-cyan-300 !border-cyan-700/60" : ""}`}
-            title="Mono cyan (2)"
+            title="Single cyan color (2)"
             onClick={() => setColorMode("cyan")}
           >
-            CYA
+            Cyan
           </button>
           <button
             className={`btn-tool !px-1.5 ${colorMode === "depth" ? "!text-cyan-300 !border-cyan-700/60" : ""}`}
-            title="Depth gradient (3)"
+            title="Color by distance from center (3)"
             onClick={() => setColorMode("depth")}
           >
-            DEP
+            Depth
           </button>
           <div className="w-px h-5 bg-slate-700/70 mx-0.5" />
           <input
