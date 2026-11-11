@@ -220,3 +220,56 @@ def test_logs_can_be_scoped_to_one_job(client):
 
     assert [entry["message"] for entry in everything] == ["old run", "new run"]
     assert [entry["message"] for entry in latest] == ["new run"]
+
+
+def test_queued_job_can_be_canceled_and_deleted(client, monkeypatch):
+    """A job waiting behind another one is canceled immediately, not when it starts."""
+    import threading
+    import time
+
+    import backend.app.api.projects as projects_api
+
+    release = threading.Event()
+    started = threading.Event()
+
+    def blocking_pipeline(ctx, project, params):
+        started.set()
+        release.wait(5)
+
+    monkeypatch.setattr(projects_api, "run_reconstruction", blocking_pipeline)
+    files = [("files", (f"v{i}.jpg", _jpeg_bytes(), "image/jpeg")) for i in range(3)]
+
+    busy = _create_project(client, "busy")
+    waiting = _create_project(client, "waiting")
+    for pid in (busy, waiting):
+        client.post(f"/api/projects/{pid}/images", files=files)
+    try:
+        assert client.post(f"/api/projects/{busy}/reconstruct", json={}).status_code == 202
+        assert started.wait(5)
+        assert client.post(f"/api/projects/{waiting}/reconstruct", json={}).status_code == 202
+
+        r = client.post(f"/api/projects/{waiting}/cancel")
+        assert r.json()["cancelRequested"] is True
+        st = client.get(f"/api/projects/{waiting}/status").json()
+        assert st["project"]["status"] == "canceled"
+        assert st["job"]["status"] == "canceled"
+        assert client.delete(f"/api/projects/{waiting}").status_code == 204
+    finally:
+        release.set()
+    for _ in range(100):
+        if client.get(f"/api/projects/{busy}/status").json()["project"]["status"] == "completed":
+            break
+        time.sleep(0.05)
+    assert client.get(f"/api/projects/{busy}/status").json()["project"]["status"] == "completed"
+
+
+def test_oversized_image_is_rejected_with_413(client, monkeypatch):
+    from backend.app.config import settings
+
+    monkeypatch.setattr(settings, "max_upload_mb", 1)
+    pid = _create_project(client)
+    big = b"\xff\xd8" + b"0" * (2 * 1024 * 1024)
+    r = client.post(f"/api/projects/{pid}/images",
+                    files=[("files", ("big.jpg", big, "image/jpeg"))])
+    assert r.status_code == 413
+    assert "big.jpg" in r.json()["detail"]
