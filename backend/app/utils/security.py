@@ -24,11 +24,7 @@ def _is_dangerous_name(name: str) -> bool:
         return True
     if ":" in name or name.startswith("//"):
         return True
-    for part in p.parts:
-        if part == ".." or part == "":
-            if part == "..":
-                return True
-    return False
+    return ".." in p.parts
 
 
 def extract_images_from_zip(
@@ -80,7 +76,14 @@ def extract_images_from_zip(
             ext = Path(info.filename).suffix.lower()
             if ext not in allowed_exts:
                 continue
-            target = dest_dir / sanitize_filename(info.filename)
+            # Folders are flattened, so "day1/IMG_1.jpg" and "day2/IMG_1.jpg"
+            # would collide: give each extracted file a unique name.
+            name = sanitize_filename(info.filename)
+            target = dest_dir / name
+            counter = 1
+            while target.exists():
+                target = dest_dir / f"{Path(name).stem}_{counter}{Path(name).suffix}"
+                counter += 1
             with zf.open(info) as src, open(target, "wb") as out:
                 while chunk := src.read(1 << 20):
                     out.write(chunk)
