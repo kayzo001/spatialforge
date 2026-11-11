@@ -10,8 +10,7 @@
     "build": "npm --prefix frontend run build",
     "test:backend": "python -m pytest tests -m 'not integration and not gpu'",
     "test:backend:all": "python -m pytest tests",
-    "lint:backend": "ruff check backend scripts tests",
-    "lint:frontend": "npm --prefix frontend run lint"
+    "lint:backend": "ruff check backend scripts tests"
   },
   "engines": {
     "node": ">=18"
