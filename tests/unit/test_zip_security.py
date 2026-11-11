@@ -73,3 +73,10 @@ def test_extracts_within_dedicated_names(tmp_path):
     extracted = extract_images_from_zip(z, out, ALLOWED)
     for p in extracted:
         assert p.resolve().parent == out.resolve()
+
+
+def test_same_name_in_different_folders_is_kept(tmp_path):
+    z = _zip(tmp_path, {"day1/IMG_1.jpg": PNG_BYTES, "day2/IMG_1.jpg": PNG_BYTES + b"x"})
+    extracted = extract_images_from_zip(z, tmp_path / "out", ALLOWED)
+    assert sorted(p.name for p in extracted) == ["IMG_1.jpg", "IMG_1_1.jpg"]
+    assert len({p.read_bytes() for p in extracted}) == 2
