@@ -80,7 +80,9 @@ class JobManager:
 
     def __init__(self) -> None:
         self._queue: queue.Queue[tuple[str, str, JobFn]] = queue.Queue()
+        # keyed by job id; created at submit time so queued jobs can be canceled too
         self._cancel_events: dict[str, threading.Event] = {}
+        self._state_lock = threading.Lock()  # guards queued -> running/canceled
         self._worker: threading.Thread | None = None
         self._started = False
 
@@ -115,27 +117,41 @@ class JobManager:
         if active is not None:
             raise RuntimeError("A job is already queued or running for this project")
         job = db.create_job(project_id, kind)
+        self._cancel_events[job["id"]] = threading.Event()
         db.update_project(project_id, status="queued", error=None)
         self._queue.put((project_id, job["id"], fn))
         bus.publish(project_id, "status", {"status": "queued", "jobId": job["id"]})
         return job
 
     def request_cancel(self, project_id: str) -> bool:
-        event = self._cancel_events.get(project_id)
-        if event is None:
-            return False
-        event.set()
-        return True
+        with self._state_lock:
+            job = db.active_job(project_id)
+            if job is None:
+                return False
+            event = self._cancel_events.get(job["id"])
+            if event is None:
+                return False
+            event.set()
+            if job["status"] == "queued":
+                # Not started yet: cancel right away so the project can be
+                # deleted or re-run without waiting for the worker to reach it.
+                db.update_job(job["id"], status="canceled", finished_at=db._now())
+                db.update_project(project_id, status="canceled")
+                bus.publish(project_id, "status", {"status": "canceled", "jobId": job["id"]})
+            return True
 
     def _run_loop(self) -> None:
         while True:
             project_id, job_id, fn = self._queue.get()
-            cancel_event = threading.Event()
-            self._cancel_events[project_id] = cancel_event
+            with self._state_lock:
+                cancel_event = self._cancel_events.setdefault(job_id, threading.Event())
+                if cancel_event.is_set():  # canceled while still queued
+                    self._cancel_events.pop(job_id, None)
+                    continue
+                db.update_job(job_id, status="running", started_at=db._now())
+                db.update_project(project_id, status="processing")
             ctx = JobContext(job_id, project_id, cancel_event)
 
-            db.update_job(job_id, status="running", started_at=db._now())
-            db.update_project(project_id, status="processing")
             bus.publish(project_id, "status", {"status": "processing", "jobId": job_id})
             try:
                 fn(ctx)
@@ -157,7 +173,7 @@ class JobManager:
                 bus.publish(project_id, "status", {"status": "completed", "jobId": job_id})
                 bus.publish(project_id, "done", {})
             finally:
-                self._cancel_events.pop(project_id, None)
+                self._cancel_events.pop(job_id, None)
 
 
 def get_manager() -> JobManager:
