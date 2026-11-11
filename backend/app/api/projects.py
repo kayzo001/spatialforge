@@ -16,7 +16,7 @@ from backend.app.schemas import ProjectCreate, ReconstructRequest
 from backend.app.services import project_store
 from backend.app.services.event_bus import bus
 from backend.app.services.job_manager import get_manager
-from backend.app.services.upload_service import UploadError, ingest_uploads
+from backend.app.services.upload_service import FileTooLarge, UploadError, ingest_uploads
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
 
@@ -70,20 +70,21 @@ _MAX_READ = settings.max_upload_mb * 1024 * 1024
 
 
 @router.post("/{project_id}/images")
-async def upload_images(
+def upload_images(
     project_id: str, files: list[UploadFile] = File(...)  # noqa: B008
 ) -> dict:
+    # Sync handler: FastAPI runs it in a thread pool, and the files are copied
+    # to disk in chunks from their spooled temp files instead of read into RAM.
     _get_project_or_404(project_id)
-    payload: list[tuple[str, bytes]] = []
     for f in files:
-        if f.size is not None and f.size > _MAX_READ + 1024:
+        is_zip = (f.filename or "").lower().endswith(".zip")
+        if not is_zip and f.size is not None and f.size > _MAX_READ:
             raise HTTPException(413, f"{f.filename} exceeds {settings.max_upload_mb} MB")
-        data = await f.read()
-        if len(data) > _MAX_READ + 1024:
-            raise HTTPException(413, f"{f.filename} exceeds {settings.max_upload_mb} MB")
-        payload.append((f.filename or "unnamed", data))
+    payload = [(f.filename or "unnamed", f.file) for f in files]
     try:
         report = ingest_uploads(project_id, payload)
+    except FileTooLarge as exc:
+        raise HTTPException(413, str(exc)) from exc
     except UploadError as exc:
         raise HTTPException(400, str(exc)) from exc
     return report
