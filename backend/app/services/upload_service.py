@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import shutil
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO
 
 from backend.app import db
 from backend.app.config import settings
@@ -21,7 +21,7 @@ from backend.app.reconstruction.preprocessing.validation import (
     dhash,
     inspect_image,
 )
-from backend.app.utils.files import sanitize_filename
+from backend.app.utils.files import sanitize_filename, sha256_file
 from backend.app.utils.security import UnsafeZipError, extract_images_from_zip
 
 
@@ -29,10 +29,22 @@ class UploadError(ValueError):
     pass
 
 
-def _save_stream(data: bytes, dest: Path) -> Path:
+class FileTooLarge(UploadError):
+    pass
+
+
+def _save_stream(src: BinaryIO, dest: Path, max_bytes: int | None = None) -> Path:
+    """Copy an upload to disk in 1 MB chunks so it is never held in memory whole."""
     dest.parent.mkdir(parents=True, exist_ok=True)
-    with open(dest, "wb") as f:
-        f.write(data)
+    written = 0
+    with open(dest, "wb") as out:
+        while chunk := src.read(1 << 20):
+            written += len(chunk)
+            if max_bytes is not None and written > max_bytes:
+                out.close()
+                dest.unlink(missing_ok=True)
+                raise FileTooLarge(f"exceeds {max_bytes // (1024 * 1024)} MB")
+            out.write(chunk)
     return dest
 
 
@@ -123,17 +135,15 @@ def _ingest_paths(project_id: str, paths: list[Path], source_label: str,
 
 
 def _sha(path: Path) -> str:
-    import hashlib
-
-    h = hashlib.sha256()
-    with open(path, "rb") as f:
-        while chunk := f.read(1 << 20):
-            h.update(chunk)
-    return h.hexdigest()
+    return sha256_file(path)
 
 
-def ingest_uploads(project_id: str, files: list[tuple[str, bytes]]) -> dict[str, Any]:
-    """Ingest in-memory uploads: list of (filename, bytes). ZIPs are extracted."""
+def ingest_uploads(project_id: str, files: list[tuple[str, BinaryIO]]) -> dict[str, Any]:
+    """Ingest uploads: list of (filename, binary file object). ZIPs are extracted.
+
+    Raises FileTooLarge if a single image exceeds the per-file limit.
+    """
+    per_file_limit = settings.max_upload_mb * 1024 * 1024
     staging = settings.project_dir(project_id) / "staging"
     staging.mkdir(parents=True, exist_ok=True)
     collected: list[Path] = []
@@ -144,7 +154,7 @@ def ingest_uploads(project_id: str, files: list[tuple[str, bytes]]) -> dict[str,
             ext = Path(name).suffix.lower()
             if ext == ".zip":
                 tmp = staging / f"zip_{sanitize_filename(Path(name).stem)}_{len(collected)}.zip"
-                _save_stream(data, tmp)
+                _save_stream(data, tmp, settings.max_project_mb * 1024 * 1024)
                 try:
                     extracted = extract_images_from_zip(
                         tmp, staging, image_exts(),
@@ -158,7 +168,10 @@ def ingest_uploads(project_id: str, files: list[tuple[str, bytes]]) -> dict[str,
                     tmp.unlink(missing_ok=True)
             elif ext in image_exts():
                 p = staging / f"file_{len(collected)}_{sanitize_filename(name)}"
-                _save_stream(data, p)
+                try:
+                    _save_stream(data, p, per_file_limit)
+                except FileTooLarge as exc:
+                    raise FileTooLarge(f"{name} {exc}") from exc
                 collected.append(p)
             else:
                 errors.append(f"{name}: unsupported file type {ext or '(none)'}")
